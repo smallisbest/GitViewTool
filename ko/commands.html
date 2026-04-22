@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>명령어 — gt</title>
+    <meta name="description" content="gt의 전체 명령어 레퍼런스. 용도별 그룹으로 정리된 모든 서브커맨드, 플래그, 기본값, 동작 설명.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· 명령어</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">홈</a>
+        <a href="guide.html">가이드</a>
+        <a href="usage.html">사용법</a>
+        <a href="commands.html" class="active">명령어</a>
+        <a href="architecture.html">구조</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="../en/commands.html">EN</a>
+        <a href="commands.html" class="active">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>명령어 레퍼런스</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    용도별로 묶은 모든 서브커맨드 설명. 터미널에서
+    <code>gt --help</code> 또는 <code>gt &lt;명령&gt; --help</code>로도
+    같은 내용을 볼 수 있습니다.
+</p>
+
+<div class="toc">
+    <strong>그룹</strong>
+    <ul>
+        <li><a href="#global">전역 옵션</a></li>
+        <li><a href="#repo">저장소 설정</a></li>
+        <li><a href="#views">View 관리</a></li>
+        <li><a href="#mount">마운트 제어</a></li>
+        <li><a href="#element">파일 조작</a></li>
+        <li><a href="#meta">정보 조회</a></li>
+        <li><a href="#env">환경변수</a></li>
+        <li><a href="#exit">종료 코드</a></li>
+    </ul>
+</div>
+
+<!-- GLOBAL -->
+<div class="cmd-group" id="global">
+    <h3>전역 옵션</h3>
+    <dl>
+        <dt>-C, --repo &lt;path&gt;</dt>
+        <dd>현재 디렉터리 대신 지정한 경로의 저장소를 대상으로 실행.</dd>
+
+        <dt>--help</dt>
+        <dd>상위 help 출력.</dd>
+
+        <dt>--help-all</dt>
+        <dd>모든 서브커맨드의 help를 재귀적으로 함께 출력.</dd>
+
+        <dt>--version</dt>
+        <dd>짧은 버전 문자열 출력.</dd>
+
+        <dt>--version-long</dt>
+        <dd>버전, 빌드 번호, 커밋 해시, 의존성 버전을 여러 줄로
+            출력.</dd>
+    </dl>
+</div>
+
+<!-- REPO -->
+<div class="cmd-group" id="repo">
+    <h3>저장소 설정</h3>
+    <dl>
+        <dt>gt mkvob [path] [--default-branch &lt;branch&gt;]</dt>
+        <dd>
+            Git 저장소를 gt에 등록해 다른 명령이 해당 저장소를 인식하도록
+            만듭니다. 멱등 — 이미 등록된 저장소에 다시 실행하면 기존
+            등록 정보만 반환. <code>path</code> 생략 시 현재 디렉터리
+            사용.
+            <br>
+            <code>~/.gt/repos/&lt;id&gt;/</code>에 메타데이터 DB와 초기
+            설정 파일을 생성합니다. <code>--default-branch</code> 기본값은
+            <code>main</code>이며 view 생성 시 <code>--branch</code>가
+            지정되지 않으면 이 값이 사용됩니다.
+        </dd>
+    </dl>
+</div>
+
+<!-- VIEWS -->
+<div class="cmd-group" id="views">
+    <h3>View 관리</h3>
+    <dl>
+        <dt>gt mkview &lt;name&gt; [-b, --branch &lt;branch&gt;] [-m, --mount &lt;path&gt;]</dt>
+        <dd>
+            새 view 생성. <code>--branch</code>는 view가 고정될 브랜치
+            (생략 시 저장소 설정의 <code>default_cs_branch</code>).
+            <code>--mount</code>는 기본 마운트 위치
+            (<code>~/.gt/repos/&lt;id&gt;/mounts/&lt;name&gt;</code>)를
+            override. 생성만 하고 서빙은 <code>gt mount</code>로 별도
+            시작합니다.
+        </dd>
+
+        <dt>gt lsview [-l, --long]</dt>
+        <dd>현재 저장소의 view 목록. <code>-l</code>은 브랜치, 마운트
+            경로, 생성 시각까지 표시.</dd>
+
+        <dt>gt rmview &lt;name&gt; [-f, --force]</dt>
+        <dd>View 제거. 마운트된 상태면 거부하며, <code>-f</code>를
+            주면 강제로 제거하고 overlay 디렉터리까지 삭제합니다.</dd>
+
+        <dt>gt setview &lt;name&gt;</dt>
+        <dd>View의 마운트 디렉터리로 CWD를 옮기고
+            <code>GT_VIEW</code>를 export한 대화형 서브셸을 실행해,
+            이후 <code>gt</code> 명령이 해당 view를 자동 대상으로
+            삼도록 합니다.</dd>
+
+        <dt>gt catcs &lt;name&gt;</dt>
+        <dd>View의 config spec 출력. Phase 1에서는 단일 브랜치 규칙.</dd>
+
+        <dt>gt setcs &lt;name&gt; -b, --branch &lt;branch&gt;</dt>
+        <dd>View의 고정 브랜치 변경. 반영하려면 <code>gt umount</code>
+            후 <code>gt mount</code>로 재마운트.</dd>
+    </dl>
+</div>
+
+<!-- MOUNT -->
+<div class="cmd-group" id="mount">
+    <h3>마운트 제어</h3>
+    <dl>
+        <dt>gt mount &lt;name&gt; [-d, --debug]</dt>
+        <dd>
+            View를 FUSE로 서빙 시작. Foreground로 실행되며 umount까지
+            블록됩니다. <code>-d</code>는 FUSE 레벨 디버그 출력을
+            stderr로 보냅니다.
+            <br>
+            FUSE-T 미설치 상태면 명확한 안내를 출력하고 코드 2로 종료.
+        </dd>
+
+        <dt>gt umount &lt;name&gt; [-f, --force]</dt>
+        <dd>View 언마운트. <code>unmount(2)</code> syscall이 실패하면
+            <code>/sbin/umount</code>로 폴백. <code>-f</code>는
+            <code>MNT_FORCE</code>를 전달.</dd>
+    </dl>
+</div>
+
+<!-- ELEMENT -->
+<div class="cmd-group" id="element">
+    <h3>파일 조작</h3>
+    <dl>
+        <dt>gt checkout &lt;file&gt; [options] — 별칭: <code>gt co</code></dt>
+        <dd>
+            파일 편집 권한 획득 후 해당 view의 overlay로 현재 브랜치
+            내용을 구체화.
+            <br><br>
+            <code>-reserved</code> (기본) — 해당 파일에 대해 view 하나만
+            reserved 체크아웃 보유 가능.
+            <br>
+            <code>-unreserved</code> — 여러 view가 동시에 체크아웃
+            가능, 먼저 체크인한 쪽이 이김.
+            <br>
+            <code>-c &lt;comment&gt;</code> — 체크아웃 기록에 코멘트
+            저장.
+            <br>
+            <code>-nc</code> — 코멘트 없음.
+            <br>
+            <code>--view &lt;name&gt;</code> — 대상 view 지정
+            (<code>GT_VIEW</code>로 대체 가능).
+        </dd>
+
+        <dt>gt checkin &lt;file&gt; [options] — 별칭: <code>gt ci</code></dt>
+        <dd>
+            View의 overlay 내용을 고정된 브랜치에 진짜 Git 커밋으로
+            만들고, 체크아웃 기록과 overlay 파일을 제거. 체크아웃 이후
+            브랜치가 움직였으면 경고.
+            <br><br>
+            <code>-c &lt;comment&gt;</code>, <code>-nc</code>,
+            <code>--view</code>는 <code>checkout</code>과 동일.
+        </dd>
+
+        <dt>gt uncheckout &lt;file&gt; [options] — 별칭: <code>gt unco</code></dt>
+        <dd>
+            커밋 없이 체크아웃 취소. overlay 파일 제거.
+            <br><br>
+            <code>-keep</code> — 취소 전 overlay를
+            <code>&lt;file&gt;.keep</code>으로 이름을 바꿔 백업.
+            <br>
+            <code>-rm</code> — 조용히 삭제 (기본).
+            <br>
+            <code>--view &lt;name&gt;</code> 동일.
+        </dd>
+
+        <dt>gt ls [--co, --checkedout] [--view &lt;name&gt;]</dt>
+        <dd>View 내 요소 목록. 플래그 없이 전체 파일을 나열하며
+            체크아웃된 파일에는 <code>*</code> 표시. <code>--co</code>는
+            체크아웃된 파일만 표시하며 <code>R</code>(reserved) 또는
+            <code>U</code>(unreserved) 접두어를 붙입니다.</dd>
+
+        <dt>gt lshistory &lt;file&gt; [-n, --limit &lt;N&gt;] [--view &lt;name&gt;] — 별칭: <code>gt lsh</code></dt>
+        <dd>View가 고정된 브랜치상의 해당 파일 Git 이력. 기본 20개.</dd>
+
+        <dt>gt diff &lt;file&gt; [-pred, --predecessor] [--view &lt;name&gt;]</dt>
+        <dd>View의 overlay와 브랜치 tip blob 사이의 unified diff.
+            <code>-pred</code>는 현재 tip 대신 직전 커밋의 버전과
+            비교.</dd>
+    </dl>
+</div>
+
+<!-- META -->
+<div class="cmd-group" id="meta">
+    <h3>정보 조회</h3>
+    <dl>
+        <dt>gt --version</dt>
+        <dd>짧은 버전 문자열. 예: <code>gt
+            0.1.0+20260422.0115.abc1234</code>.</dd>
+
+        <dt>gt --version-long</dt>
+        <dd>버전, 빌드 번호, 빌드 시각, 커밋 해시와 브랜치, 내장된
+            libgit2 / SQLite / spdlog 버전을 여러 줄로 출력.</dd>
+
+        <dt>gt --help / gt --help-all</dt>
+        <dd>상위 help 또는 모든 서브커맨드 help의 재귀 확장.</dd>
+    </dl>
+</div>
+
+<!-- ENV -->
+<h2 id="env">환경변수</h2>
+<table>
+    <tr><th>변수</th><th>용도</th></tr>
+    <tr>
+        <td><code>GT_HOME</code></td>
+        <td>gt의 모든 메타데이터, overlay, 마운트 루트. 기본값
+            <code>~/.gt</code>.</td>
+    </tr>
+    <tr>
+        <td><code>GT_REPO</code></td>
+        <td>현재 디렉터리 대신 사용할 저장소 절대 경로
+            (<code>-C</code>보다 우선순위 낮음).</td>
+    </tr>
+    <tr>
+        <td><code>GT_VIEW</code></td>
+        <td><code>--view</code>를 받는 모든 명령의 기본 view.
+            <code>gt setview</code>의 서브셸에서 자동 설정됨.</td>
+    </tr>
+    <tr>
+        <td><code>GT_TRACE_FS</code></td>
+        <td>비어있지 않은 값으로 설정하면 <code>gt mount</code>가 FUSE
+            <code>getattr</code> 호출마다 한 줄씩 stderr에 기록 (디버그
+            용).</td>
+    </tr>
+</table>
+
+<!-- EXIT -->
+<h2 id="exit">종료 코드</h2>
+<table>
+    <tr><th>코드</th><th>의미</th></tr>
+    <tr><td>0</td><td>성공</td></tr>
+    <tr><td>1</td><td>명령별 실패 (충돌, I/O 오류, Git 오류 등)</td></tr>
+    <tr><td>2</td><td>환경 또는 인자 오류 (FUSE-T 미설치, 저장소 미발견, 잘못된 플래그 조합 등)</td></tr>
+</table>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase와 cleartool은 IBM / HCL Technologies의 상표입니다. 본 제품은 두 회사와 제휴 관계가 없으며 어떠한 후원도 받지 않습니다.</span><br>
+    <a href="index.html">홈</a> ·
+    <a href="guide.html">가이드</a> ·
+    <a href="usage.html">사용법</a> ·
+    <a href="architecture.html">구조</a>
+</div></footer>
+</body>
+</html>

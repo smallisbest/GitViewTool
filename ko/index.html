@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gt — GitViewTool</title>
+    <meta name="description" content="gt는 일반 Git 저장소에 ClearCase 스타일의 워크플로우를 제공합니다. 이름 붙은 view, reserved checkout, 경량 동적 마운트.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· Git 위의 ClearCase 스타일 워크플로우</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html" class="active">홈</a>
+        <a href="guide.html">가이드</a>
+        <a href="usage.html">사용법</a>
+        <a href="commands.html">명령어</a>
+        <a href="architecture.html">구조</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="../en/index.html">EN</a>
+        <a href="index.html" class="active">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<section class="hero">
+    <h1>ClearCase 감각, 내부는 Git.</h1>
+    <p class="lede">
+        gt는 일반 Git 저장소를 <code>cleartool</code> 사용자에게 익숙한
+        개념으로 감쌉니다 — 이름 붙은 view, reserved/unreserved
+        checkout, 그리고 view별 편집 상태를 분리해 주는 동적 마운트.
+        중앙 VOB 서버도 커널 확장도 필요 없고, 저장소 자체는 전혀
+        바뀌지 않습니다.
+    </p>
+    <p class="ctas">
+        <a class="cta" href="guide.html">5분 만에 설치 · 실행</a>
+        <a class="cta secondary" href="usage.html">실제 작업 예시 보기</a>
+    </p>
+</section>
+
+<h2>gt가 해결하는 것</h2>
+<div class="features">
+    <div class="feature">
+        <h3>독립된 view</h3>
+        <p>각 view는 브랜치에 고정된 영속 작업공간입니다. 같은 브랜치에
+           올라탄 두 view도 편집 상태, mtime, 체크아웃 목록이 완전히
+           분리됩니다.</p>
+    </div>
+    <div class="feature">
+        <h3>진짜 체크아웃 의미</h3>
+        <p>Reserved 체크아웃은 view 간 배타적 편집 락을 보장하고,
+           unreserved는 동시 작업을 허용하며 먼저 체크인한 쪽이
+           이깁니다. Git만으로는 할 수 없는 일.</p>
+    </div>
+    <div class="feature">
+        <h3>경량 마운트</h3>
+        <p>View의 트리는 사용자 공간 가상 파일시스템으로 제공됩니다.
+           파일은 지연 로드 — view마다 저장소 전체를 복제하지 않고,
+           디스크 낭비 0.</p>
+    </div>
+    <div class="feature">
+        <h3>view별 mtime 보존</h3>
+        <p>각 view는 파일 수정시간을 독립적으로 관리합니다. view를
+           전환해도 다른 view의 상태는 건드리지 않습니다.</p>
+    </div>
+    <div class="feature">
+        <h3>저장소를 건드리지 않음</h3>
+        <p>gt의 메타데이터는 <code>~/.gt/</code>에 격리됩니다 —
+           <code>.git/</code>에는 손대지 않음. 기존 git 명령과 IDE 연동
+           모두 그대로 동작.</p>
+    </div>
+    <div class="feature">
+        <h3>진짜 Git 커밋</h3>
+        <p>체크인 시 gt는 view가 가리키는 브랜치에 평범한 Git 커밋을
+           생성합니다. <code>git log</code>, <code>git push</code>, CI
+           모두 다른 커밋과 구분하지 않습니다.</p>
+    </div>
+</div>
+
+<h2>한눈에</h2>
+<pre><code># 저장소별 1회 등록
+gt mkvob
+
+# main 브랜치에 고정된 view 생성 + 마운트
+gt mkview dev --branch main
+gt mount  dev
+
+# 다른 터미널에서 — 파일 획득, 편집, 체크인
+gt co  src/hello.c --view dev -c "adding hello"
+$EDITOR ~/.gt/repos/&lt;id&gt;/mounts/dev/src/hello.c
+gt ci  src/hello.c --view dev -c "implemented hello"
+
+# 생성된 커밋은 일반 git push로 리모트에
+git -C ~/src/myproject push origin main</code></pre>
+
+<h2>시작하기</h2>
+<p>
+    <a class="cta" href="guide.html">설치 · 첫 사용 가이드</a>
+    <a class="cta secondary" href="commands.html">명령어 레퍼런스</a>
+    <a class="cta secondary" href="architecture.html">구조 설명</a>
+</p>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase와 cleartool은 IBM / HCL Technologies의 상표입니다. 본 제품은 두 회사와 제휴 관계가 없으며 어떠한 후원도 받지 않습니다.</span><br>
+    <a href="guide.html">가이드</a> ·
+    <a href="usage.html">사용법</a> ·
+    <a href="commands.html">명령어</a> ·
+    <a href="architecture.html">구조</a>
+</div></footer>
+</body>
+</html>

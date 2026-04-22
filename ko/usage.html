@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>사용법 — gt</title>
+    <meta name="description" content="기존 Git 저장소에서 gt를 쓰는 법을 시나리오 중심으로 설명합니다. git과 나란히 비교, 대응표, 자주 하는 실수 포함.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· 사용법</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">홈</a>
+        <a href="guide.html">가이드</a>
+        <a href="usage.html" class="active">사용법</a>
+        <a href="commands.html">명령어</a>
+        <a href="architecture.html">구조</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="../en/usage.html">EN</a>
+        <a href="usage.html" class="active">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>기존 Git 저장소에서 gt 쓰기</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    시나리오 중심의 실전 가이드. 각 시나리오에서 "원래 git으로는 이렇게
+    했는데 gt로는 이렇게 한다"를 좌우로 비교해, 무엇이 달라지고 무엇이
+    그대로인지 한눈에 파악할 수 있습니다.
+</p>
+
+<div class="toc">
+    <strong>이 페이지 안에서</strong>
+    <ul>
+        <li><a href="#mental">5분 개념 모델</a></li>
+        <li><a href="#scenarios">시나리오</a></li>
+        <li><a href="#mapping">git ↔ gt 대응표</a></li>
+        <li><a href="#coexist">git과 공존</a></li>
+        <li><a href="#pitfalls">자주 하는 실수</a></li>
+    </ul>
+</div>
+
+<h2 id="mental">5분 개념 모델</h2>
+<p>gt는 일반 Git 저장소 위에 <strong>작업공간 계층</strong>을
+   얹습니다. 저장소 자체는 건드리지 않습니다.</p>
+
+<table>
+    <tr><th>gt 개념</th><th>git 유사 개념</th><th>무엇인가</th></tr>
+    <tr>
+        <td><code>view</code></td>
+        <td>독립 staging을 가진 worktree</td>
+        <td>이름 붙은 작업공간. 각자의 마운트 경로와 편집 중 파일
+            목록을 가짐. 두 view가 같은 브랜치를 독립적으로 볼 수
+            있음.</td>
+    </tr>
+    <tr>
+        <td>config spec</td>
+        <td>view가 바라보는 브랜치</td>
+        <td>view가 어느 브랜치를 기준으로 삼을지. Phase 1에서는 단일
+            브랜치 이름.</td>
+    </tr>
+    <tr>
+        <td><code>checkout</code></td>
+        <td>(git에 대응 없음)</td>
+        <td>파일 단위 "이 파일 내가 편집 중" 선언. Reserved는 배타
+            락, unreserved는 동시 허용.</td>
+    </tr>
+    <tr>
+        <td>overlay</td>
+        <td>staging + working tree</td>
+        <td>체크아웃된 파일의 편집 내용이 저장되는 view 전용 영역.
+            해당 view의 마운트에서만 보임.</td>
+    </tr>
+    <tr>
+        <td><code>ci</code></td>
+        <td><code>git add + git commit</code></td>
+        <td>overlay 내용을 진짜 Git 커밋으로 만들고 view의 브랜치 tip을
+            이동.</td>
+    </tr>
+</table>
+
+<div class="note">
+    <strong>핵심 한 줄:</strong> <code>gt ci</code>가 만드는 커밋은 일반
+    Git 커밋과 동일합니다. <code>git log</code>, <code>git push</code>,
+    <code>git blame</code> 모두 구분하지 않습니다.
+</div>
+
+<h2 id="scenarios">시나리오</h2>
+
+<div class="scenario">
+    <h3><span class="tag">S1</span> 기존 저장소에 gt 처음 붙이기</h3>
+    <p class="situation">이미 쓰던 Git 프로젝트에 gt를 얹고 싶다.
+       working tree, 브랜치, 리모트 모두 건드리지 않고.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>cd ~/src/myproject
+gt mkvob
+gt mkview dev --branch main
+gt mount dev                              # umount 전까지 블록</code></pre>
+    <p class="result"><strong>결과</strong>
+       저장소 트리가
+       <code>~/.gt/repos/&lt;id&gt;/mounts/dev/</code>에 읽기 전용으로
+       노출. 원 working tree는 건드리지 않음.
+       <code>git status</code>는 깨끗.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S2</span> working tree를 오염시키지 않고 실험적 수정</h3>
+    <p class="situation">main에서 뭔가 고쳐보고 싶은데 현재 working
+       tree에는 다른 편집이 쌓여 있다. 원래라면 stash → 새 브랜치 →
+       수정 → 되돌리기 해야 한다.</p>
+    <div class="compare">
+        <div>
+            <h4>원래 git 방식</h4>
+<pre><code>git stash
+git checkout -b experiment main
+vim src/hello.c
+# 버리기로 결정
+git checkout main
+git branch -D experiment
+git stash pop</code></pre>
+        </div>
+        <div>
+            <h4>gt — working tree 그대로</h4>
+<pre><code>gt mkview exp --branch main
+gt mount exp
+# 다른 터미널:
+gt co src/hello.c --view exp -c "try"
+$EDITOR &lt;mount&gt;/src/hello.c
+# 버리기로 결정
+gt unco src/hello.c --view exp
+gt umount exp
+gt rmview exp</code></pre>
+        </div>
+    </div>
+    <p class="result"><strong>결과</strong> 원 working tree는 전혀 수정
+       안 됨. <code>git status</code>가 처음과 동일.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S3</span> 두 가지 작업을 병렬로 진행</h3>
+    <p class="situation">기능 A와 B를 동시에 만들고 있고 자주 오가야 한다.</p>
+    <div class="compare">
+        <div>
+            <h4>원래 git — 브랜치 왕복</h4>
+<pre><code>git checkout -b feat-a main
+vim src/a.c
+git stash
+
+git checkout -b feat-b main
+vim src/b.c
+git stash
+
+git checkout feat-a
+git stash pop
+# ... 반복</code></pre>
+        </div>
+        <div>
+            <h4>gt — view 둘 다 살려둠</h4>
+<pre><code># 셋업은 한 번만
+gt mkview feat-a --branch feat-a
+gt mkview feat-b --branch feat-b
+gt mount feat-a &amp;
+gt mount feat-b &amp;
+
+# 원하는 마운트로 cd, stash 필요 없음
+cd &lt;feat-a-mount&gt;     # A 작업
+cd &lt;feat-b-mount&gt;     # B 작업</code></pre>
+        </div>
+    </div>
+    <p class="result"><strong>결과</strong> 각 view의 편집 상태, mtime,
+       체크아웃 목록이 독립 유지. 스위칭 비용 0.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S4</span> "이 파일 내가 수정 중" 명시적 락</h3>
+    <p class="situation">중요한 설정 파일을 다른 view가 실수로 동시에
+       수정하는 것을 막고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt co src/critical.conf --view main -reserved -c "urgent fix"
+
+# 다른 view의 시도는 즉시 거부:
+gt co src/critical.conf --view other
+#   → checkout conflict: element 'src/critical.conf' is already
+#     checked out (reserved requires no other holders)</code></pre>
+    <p class="result"><strong>결과</strong> 같은 머신의 다른 view가
+       수정 착수 불가. 메타데이터 레벨의 unique 제약으로 보장.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S5</span> 여러 view가 같은 파일을 느슨하게 편집</h3>
+    <p class="situation">락을 걸고 싶지 않음. 먼저 커밋한 쪽이 이기고
+       나머지는 재조정.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt co README.md --view a -unreserved -c "intro rewrite"
+gt co README.md --view b -unreserved -c "add FAQ"
+
+# view a가 먼저 체크인
+gt ci README.md --view a
+
+# view b는 브랜치가 움직였다는 경고를 봄
+gt ci README.md --view b
+#   → warning: branch 'main' moved since checkout (unreserved).
+#     Committing on top of current tip.</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S6</span> 과거 버전을 잠깐 열어보기</h3>
+    <p class="situation">지금 main에서 작업 중인데 한 달 전 release
+       브랜치 상태를 보고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt mkview peek --branch release-2025-10
+gt mount peek
+# 확인 끝
+gt umount peek
+gt rmview peek</code></pre>
+    <p class="result"><strong>결과</strong> 현재 작업 view는 영향 없음.
+       <code>git checkout</code>/<code>git switch</code> 없이 과거 열람.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S7</span> view의 기준 브랜치 변경</h3>
+    <p class="situation">기존 view를 <code>develop</code>에서
+       <code>release-2026-04</code>로 돌리고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt ls --co --view dev           # 체크아웃 상태 확인
+gt ci foo.c --view dev          # (또는 gt unco)
+
+gt setcs dev --branch release-2026-04
+gt umount dev
+gt mount dev</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S8</span> 리모트에서 받아오기</h3>
+    <p class="situation">팀원이 main에 커밋을 올렸다. 현재 체크아웃을
+       유지하면서 받아오고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code># gt는 네트워크 조작 안 함. 일반 git 사용.
+cd ~/src/myproject
+git pull origin main
+
+# FUSE 데몬은 마운트 시점 트리를 사용하므로 재마운트:
+gt umount dev
+gt mount dev
+# overlay는 유지됨 — 편집 내용 안 사라짐.</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S9</span> 이력과 diff 확인</h3>
+    <p class="situation">파일이 언제 왜 바뀌었는지 보고, 내 편집이
+       브랜치 tip과 얼마나 다른지 확인.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt lsh src/hello.c --view dev -n 10     # view 기준 간결 로그
+gt diff src/hello.c --view dev          # overlay vs 브랜치 tip
+
+# gt가 안 감싸는 기능은 일반 git으로:
+git -C ~/src/myproject log -- src/hello.c
+git -C ~/src/myproject blame src/hello.c</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S10</span> 편집 버리기</h3>
+    <p class="situation">실험한 편집을 날리고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>gt unco src/hello.c --view dev              # 조용히 버림
+gt unco src/hello.c --view dev -keep        # .keep 백업 남김
+gt rmview dev -f                            # view 통째로 폐기</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S11</span> 만든 커밋을 리모트에 push</h3>
+    <p class="situation"><code>gt ci</code>로 로컬 브랜치 tip이
+       움직였다. 리모트에 올리고 싶다.</p>
+    <p class="doit"><strong>하기</strong></p>
+<pre><code>cd ~/src/myproject
+git log --oneline main -5            # gt가 만든 커밋 확인
+git push origin main</code></pre>
+    <p class="result"><strong>결과</strong> 리모트에 올라감. 팀원
+       입장에서는 평범한 Git 커밋.</p>
+</div>
+
+<h2 id="mapping">git ↔ gt 대응표</h2>
+
+<table>
+    <tr><th>목적</th><th>git</th><th>gt</th><th>주의</th></tr>
+    <tr><td>작업공간 생성</td>
+        <td><code>git worktree add ../feat feat</code></td>
+        <td><code>gt mkview feat --branch feat</code></td>
+        <td>디스크 사본 대신 가상 마운트.</td></tr>
+    <tr><td>작업공간 전환</td>
+        <td><code>git checkout main</code></td>
+        <td>(불필요 — view 유지됨)</td>
+        <td>stash 필요 없음.</td></tr>
+    <tr><td>편집 시작</td>
+        <td>(자유롭게 편집)</td>
+        <td><code>gt co &lt;file&gt; --view V</code></td>
+        <td>명시적 체크아웃 = 실수 방지 gate.</td></tr>
+    <tr><td>커밋</td>
+        <td><code>git add X; git commit</code></td>
+        <td><code>gt ci X --view V -c "msg"</code></td>
+        <td>일반 Git 커밋 생성.</td></tr>
+    <tr><td>편집 취소</td>
+        <td><code>git restore X</code></td>
+        <td><code>gt unco X --view V</code></td>
+        <td><code>-keep</code>로 백업 가능.</td></tr>
+    <tr><td>상태 보기</td>
+        <td><code>git status</code></td>
+        <td><code>gt ls --co --view V</code></td>
+        <td>view의 체크아웃만 표시.</td></tr>
+    <tr><td>이력</td>
+        <td><code>git log -- X</code></td>
+        <td><code>gt lsh X --view V</code></td>
+        <td>view 기준 브랜치만.</td></tr>
+    <tr><td>diff</td>
+        <td><code>git diff X</code></td>
+        <td><code>gt diff X --view V</code></td>
+        <td>overlay vs 브랜치 tip.</td></tr>
+    <tr><td>브랜치 전환</td>
+        <td><code>git switch other</code></td>
+        <td><code>gt setcs V --branch other</code> + 재마운트</td>
+        <td>재마운트로 반영.</td></tr>
+    <tr><td>리모트 업데이트</td>
+        <td><code>git pull</code></td>
+        <td><code>git pull</code> + <code>gt umount/mount</code></td>
+        <td>gt는 오프라인 전용.</td></tr>
+    <tr><td>push</td>
+        <td><code>git push</code></td>
+        <td><code>git push</code> (그대로)</td>
+        <td>동일.</td></tr>
+    <tr><td>stash</td>
+        <td><code>git stash</code></td>
+        <td>(불필요 — overlay가 자연스러운 stash)</td>
+        <td>view 유지만 해도 편집 안 사라짐.</td></tr>
+    <tr><td>blame</td>
+        <td><code>git blame X</code></td>
+        <td><code>git blame</code> 그대로</td>
+        <td>gt는 감싸지 않음.</td></tr>
+    <tr><td>rebase / merge</td>
+        <td><code>git rebase</code></td>
+        <td><code>git rebase</code></td>
+        <td>이후 <code>gt umount/mount</code>로 동기화.</td></tr>
+</table>
+
+<h2 id="coexist">git과 공존</h2>
+<p>gt는 <code>.git/</code>을 전혀 건드리지 않습니다. 같은 저장소에서
+   gt와 일반 git 명령을 섞어 써도 문제 없지만 몇 가지는 알아두면
+   좋습니다.</p>
+<ul>
+    <li>읽기 전용 git (<code>log</code>, <code>blame</code>,
+        <code>show</code>)은 언제든 안전.</li>
+    <li><code>git pull</code>, <code>git push</code>는 그대로 사용 —
+        view의 브랜치가 움직이면 재마운트하여 반영.</li>
+    <li>View가 가리키는 브랜치를 <code>git branch -D</code>로 삭제하면
+        다음 <code>gt mount</code>가 실패 — 먼저 <code>gt setcs</code>로
+        다른 브랜치 지정.</li>
+    <li>같은 파일을 FUSE 마운트와 원래 working tree에서 동시에 편집하면
+        혼란만 생김. 한 쪽에서만.</li>
+</ul>
+
+<h2 id="pitfalls">자주 하는 실수</h2>
+
+<h4>"마운트는 됐는데 쓰기가 안 돼요"</h4>
+<p>마운트는 기본 읽기 전용. 먼저 <code>gt co &lt;file&gt;</code>
+   해야 합니다. 의도된 동작 — 실수 편집 방지.</p>
+
+<h4>"ci 했는데 마운트에서 여전히 옛날 내용이 보여요"</h4>
+<p>FUSE 데몬이 마운트 시점의 트리를 사용합니다.
+   <code>gt umount</code> 후 <code>gt mount</code>로 새 tip 반영.</p>
+
+<h4>"터미널이 <code>gt mount</code>로 블록돼요"</h4>
+<p>별도 터미널 창, 셸의 <code>&amp;</code>
+   (<code>gt mount dev &amp;</code>), 또는 tmux/screen 세션 사용.</p>
+
+<h4><code>--view</code> 생략하고 싶어요"</h4>
+<p>모든 파일 명령이 <code>GT_VIEW</code> 환경변수를 인식합니다.
+   <code>gt setview &lt;name&gt;</code>은 이 변수를 세팅한 서브셸을
+   열어줍니다.</p>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase와 cleartool은 IBM / HCL Technologies의 상표입니다. 본 제품은 두 회사와 제휴 관계가 없으며 어떠한 후원도 받지 않습니다.</span><br>
+    <a href="index.html">홈</a> ·
+    <a href="guide.html">가이드</a> ·
+    <a href="commands.html">명령어</a> ·
+    <a href="architecture.html">구조</a>
+</div></footer>
+</body>
+</html>

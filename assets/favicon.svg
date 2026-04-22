@@ -1,0 +1,15 @@
+<!-- gt product icon: light-orange rounded square with lowercase "gt".
+     Monospace mark, low-ink design intended to read at 16×16 favicon size
+     and scale cleanly to any larger badge use. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="gt">
+    <rect x="2" y="2" width="60" height="60" rx="14" ry="14"
+          fill="#ffc98a" stroke="#e6a96a" stroke-width="1.5"/>
+    <text x="32" y="43"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-weight="700"
+          font-size="34"
+          letter-spacing="-1"
+          text-anchor="middle"
+          fill="#4a2a06">gt</text>
+</svg>

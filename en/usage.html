@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Usage — gt</title>
+    <meta name="description" content="Scenario-driven walkthrough of using gt on an existing Git repository. Comparisons with plain git, cheat sheet, pitfalls.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· Usage</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="usage.html" class="active">Usage</a>
+        <a href="commands.html">Commands</a>
+        <a href="architecture.html">Architecture</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="usage.html" class="active">EN</a>
+        <a href="../ko/usage.html">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>Using gt on an existing Git repository</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    A scenario-driven walkthrough. Each scenario shows the plain-git way
+    and the gt way side by side, so you can see exactly what changes and
+    what stays the same.
+</p>
+
+<div class="toc">
+    <strong>On this page</strong>
+    <ul>
+        <li><a href="#mental">Mental model in 5 minutes</a></li>
+        <li><a href="#scenarios">Scenarios</a></li>
+        <li><a href="#mapping">git ↔ gt cheat sheet</a></li>
+        <li><a href="#coexist">Coexisting with plain git</a></li>
+        <li><a href="#pitfalls">Common pitfalls</a></li>
+    </ul>
+</div>
+
+<h2 id="mental">Mental model in 5 minutes</h2>
+<p>gt layers a <strong>workspace plane</strong> on top of an ordinary Git
+   repository. The repository itself is never modified by gt.</p>
+
+<table>
+    <tr><th>gt concept</th><th>Closest git analog</th><th>What it is</th></tr>
+    <tr>
+        <td><code>view</code></td>
+        <td>A worktree with independent staging</td>
+        <td>A named workspace with its own mount point and its own list
+            of in-progress edits. Two views can follow the same branch
+            independently.</td>
+    </tr>
+    <tr>
+        <td>config spec</td>
+        <td>The branch that view looks at</td>
+        <td>Which branch the view pins to. A single branch name in
+            Phase 1.</td>
+    </tr>
+    <tr>
+        <td><code>checkout</code></td>
+        <td>(no git analog)</td>
+        <td>A per-file "I claim this" record. Reserved mode is an
+            exclusive lock; unreserved allows parallel claims.</td>
+    </tr>
+    <tr>
+        <td>overlay</td>
+        <td>Staging area + working tree</td>
+        <td>The per-view area where checked-out file edits live. Visible
+            only through that view's mount.</td>
+    </tr>
+    <tr>
+        <td><code>ci</code></td>
+        <td><code>git add + git commit</code></td>
+        <td>Converts overlay contents to a real Git commit and advances
+            the view's branch tip.</td>
+    </tr>
+</table>
+
+<div class="note">
+    <strong>The one-liner:</strong> <code>gt ci</code> produces an
+    ordinary Git commit. <code>git log</code>, <code>git push</code>,
+    and <code>git blame</code> treat it identically to any other commit.
+</div>
+
+<h2 id="scenarios">Scenarios</h2>
+
+<div class="scenario">
+    <h3><span class="tag">S1</span> Attaching gt to a repo you already use</h3>
+    <p class="situation">You have an existing Git project and want to
+       try gt on it without disturbing your working tree, branches, or
+       remote.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>cd ~/src/myproject
+gt mkvob
+gt mkview dev --branch main
+gt mount dev                              # blocks until umount</code></pre>
+    <p class="result"><strong>Result</strong>
+       The repo tree is served read-only at
+       <code>~/.gt/repos/&lt;id&gt;/mounts/dev/</code>. Your original
+       working tree is untouched; <code>git status</code> is clean.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S2</span> Try a risky change without polluting the working tree</h3>
+    <p class="situation">You want to experiment on <code>main</code> but
+       your working tree has other in-flight edits. The usual answer is
+       stash → branch → edit → revert.</p>
+    <div class="compare">
+        <div>
+            <h4>Plain git</h4>
+<pre><code>git stash
+git checkout -b experiment main
+vim src/hello.c
+# decide to bail
+git checkout main
+git branch -D experiment
+git stash pop</code></pre>
+        </div>
+        <div>
+            <h4>gt — working tree stays put</h4>
+<pre><code>gt mkview exp --branch main
+gt mount exp
+# other terminal:
+gt co src/hello.c --view exp -c "try"
+$EDITOR &lt;mount&gt;/src/hello.c
+# decide to bail
+gt unco src/hello.c --view exp
+gt umount exp
+gt rmview exp</code></pre>
+        </div>
+    </div>
+    <p class="result"><strong>Result</strong> Your original working tree
+       was never modified. <code>git status</code> is exactly as
+       before.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S3</span> Two parallel pieces of work</h3>
+    <p class="situation">You're building feature A and feature B at the
+       same time and need to hop between them.</p>
+    <div class="compare">
+        <div>
+            <h4>Plain git — branch juggling</h4>
+<pre><code>git checkout -b feat-a main
+vim src/a.c
+git stash
+
+git checkout -b feat-b main
+vim src/b.c
+git stash
+
+git checkout feat-a
+git stash pop
+# ... repeat</code></pre>
+        </div>
+        <div>
+            <h4>gt — keep both views alive</h4>
+<pre><code># one-time setup
+gt mkview feat-a --branch feat-a
+gt mkview feat-b --branch feat-b
+gt mount feat-a &amp;
+gt mount feat-b &amp;
+
+# work in whichever mount you like; no stash
+cd &lt;feat-a-mount&gt;     # on A
+cd &lt;feat-b-mount&gt;     # on B</code></pre>
+        </div>
+    </div>
+    <p class="result"><strong>Result</strong> Each view keeps its own
+       edits, mtimes, and checkout list. Switching is free.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S4</span> "I'm editing this file — don't touch"</h3>
+    <p class="situation">You want to explicitly prevent any other view
+       from editing a critical file while you work on it.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt co src/critical.conf --view main -reserved -c "urgent fix"
+
+# Another view attempting the same is rejected immediately:
+gt co src/critical.conf --view other
+#   → checkout conflict: element 'src/critical.conf' is already
+#     checked out (reserved requires no other holders)</code></pre>
+    <p class="result"><strong>Result</strong> Other views on the same
+       machine cannot start editing. Enforced at the storage layer
+       with a uniqueness constraint.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S5</span> Multiple views loosely editing the same file</h3>
+    <p class="situation">You'd rather not lock. Whoever commits first
+       wins; others reconcile.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt co README.md --view a -unreserved -c "intro rewrite"
+gt co README.md --view b -unreserved -c "add FAQ"
+
+# view a commits first
+gt ci README.md --view a
+
+# view b sees the branch has moved
+gt ci README.md --view b
+#   → warning: branch 'main' moved since checkout (unreserved).
+#     Committing on top of current tip.</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S6</span> Peek at an old version without losing current edits</h3>
+    <p class="situation">You're mid-edit on main but want to browse a
+       release branch from a month ago.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt mkview peek --branch release-2025-10
+gt mount peek
+# when done
+gt umount peek
+gt rmview peek</code></pre>
+    <p class="result"><strong>Result</strong> Your working view is
+       completely untouched. No <code>git checkout</code> / <code>git
+       switch</code> required to inspect an old snapshot.</p>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S7</span> Retarget a view to a different branch</h3>
+    <p class="situation">Move an existing view from <code>develop</code>
+       to <code>release-2026-04</code>.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt ls --co --view dev           # inspect outstanding checkouts
+gt ci foo.c --view dev          # (or gt unco)
+
+gt setcs dev --branch release-2026-04
+gt umount dev
+gt mount dev</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S8</span> Pulling upstream changes</h3>
+    <p class="situation">A teammate pushed commits to main; you want to
+       pick them up without losing your in-progress checkouts.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code># gt doesn't do network ops. Use plain git.
+cd ~/src/myproject
+git pull origin main
+
+# The FUSE daemon indexes the tree at mount time, so remount:
+gt umount dev
+gt mount dev
+# Your overlays are preserved — in-progress edits survive.</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S9</span> Inspect history and diffs</h3>
+    <p class="situation">See when and why a file changed; compare your
+       in-progress edits to the branch tip.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt lsh src/hello.c --view dev -n 10     # gt-scoped log
+gt diff src/hello.c --view dev          # overlay vs branch tip
+
+# Anything gt doesn't wrap, use plain git:
+git -C ~/src/myproject log -- src/hello.c
+git -C ~/src/myproject blame src/hello.c</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S10</span> Abandoning an edit</h3>
+    <p class="situation">You decided not to ship a change.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>gt unco src/hello.c --view dev              # silent discard
+gt unco src/hello.c --view dev -keep        # keep a .keep backup
+gt rmview dev -f                            # nuke the whole view</code></pre>
+</div>
+
+<div class="scenario">
+    <h3><span class="tag">S11</span> Push your gt commits upstream</h3>
+    <p class="situation"><code>gt ci</code> moved the local branch tip.
+       You want it on GitHub / your internal remote.</p>
+    <p class="doit"><strong>Do</strong></p>
+<pre><code>cd ~/src/myproject
+git log --oneline main -5            # see the commits gt created
+git push origin main</code></pre>
+    <p class="result"><strong>Result</strong> Your gt commits are on the
+       remote. Teammates see them as ordinary git commits — because they
+       are.</p>
+</div>
+
+<h2 id="mapping">git ↔ gt cheat sheet</h2>
+
+<table>
+    <tr><th>Goal</th><th>git</th><th>gt</th><th>Notes</th></tr>
+    <tr><td>Create workspace</td>
+        <td><code>git worktree add ../feat feat</code></td>
+        <td><code>gt mkview feat --branch feat</code></td>
+        <td>Uses a virtual mount, not a disk copy.</td></tr>
+    <tr><td>Switch workspace</td>
+        <td><code>git checkout main</code></td>
+        <td>(unnecessary — views persist)</td>
+        <td>No stash required.</td></tr>
+    <tr><td>Start editing</td>
+        <td>(git lets you just edit)</td>
+        <td><code>gt co &lt;file&gt; --view V</code></td>
+        <td>Explicit checkout as a safety gate.</td></tr>
+    <tr><td>Commit</td>
+        <td><code>git add X; git commit</code></td>
+        <td><code>gt ci X --view V -c "msg"</code></td>
+        <td>gt ci produces a normal git commit.</td></tr>
+    <tr><td>Discard edit</td>
+        <td><code>git restore X</code></td>
+        <td><code>gt unco X --view V</code></td>
+        <td><code>-keep</code> preserves a backup.</td></tr>
+    <tr><td>See status</td>
+        <td><code>git status</code></td>
+        <td><code>gt ls --co --view V</code></td>
+        <td>Shows the view's checkouts.</td></tr>
+    <tr><td>History</td>
+        <td><code>git log -- X</code></td>
+        <td><code>gt lsh X --view V</code></td>
+        <td>Scoped to the view's branch.</td></tr>
+    <tr><td>Diff</td>
+        <td><code>git diff X</code></td>
+        <td><code>gt diff X --view V</code></td>
+        <td>Overlay vs branch tip.</td></tr>
+    <tr><td>Switch branch</td>
+        <td><code>git switch other</code></td>
+        <td><code>gt setcs V --branch other</code> + remount</td>
+        <td>Remount applies the change.</td></tr>
+    <tr><td>Pull upstream</td>
+        <td><code>git pull</code></td>
+        <td><code>git pull</code> + <code>gt umount/mount</code></td>
+        <td>gt is offline-only.</td></tr>
+    <tr><td>Push</td>
+        <td><code>git push</code></td>
+        <td><code>git push</code> (unchanged)</td>
+        <td>Same as always.</td></tr>
+    <tr><td>Stash</td>
+        <td><code>git stash</code></td>
+        <td>(unnecessary — overlay is the stash)</td>
+        <td>Keep the view and edits are never lost.</td></tr>
+    <tr><td>Blame</td>
+        <td><code>git blame X</code></td>
+        <td>use <code>git blame</code></td>
+        <td>gt does not wrap it.</td></tr>
+    <tr><td>Rebase / merge</td>
+        <td><code>git rebase</code></td>
+        <td><code>git rebase</code></td>
+        <td>Then <code>gt umount/mount</code> to resync.</td></tr>
+</table>
+
+<h2 id="coexist">Coexisting with plain git</h2>
+<p>gt never touches <code>.git/</code>. You can freely mix gt and plain
+   git commands on the same repository. A few things to keep in mind:</p>
+<ul>
+    <li>Read-only git (<code>log</code>, <code>blame</code>,
+        <code>show</code>) is always safe.</li>
+    <li><code>git pull</code> / <code>git push</code> work as usual —
+        remount a view when its pinned branch has moved.</li>
+    <li>Deleting the branch a view points to (<code>git branch -D</code>)
+        will break the next <code>gt mount</code>; retarget with
+        <code>gt setcs</code> first.</li>
+    <li>Editing the same file simultaneously through the FUSE mount and
+        your plain working tree is just confusing — pick one.</li>
+</ul>
+
+<h2 id="pitfalls">Common pitfalls</h2>
+
+<h4>"The mount exists but I can't write to files"</h4>
+<p>The mount is read-only by default. Run <code>gt co &lt;file&gt;</code>
+   first. This gate is intentional — it prevents accidental edits.</p>
+
+<h4>"I ci'd but the mount still shows the old content"</h4>
+<p>The FUSE daemon indexes the tree at mount time. Run
+   <code>gt umount</code> then <code>gt mount</code> to pick up the new
+   tip.</p>
+
+<h4>"<code>gt mount</code> keeps my terminal blocked"</h4>
+<p>Use a dedicated terminal window, run with the shell's <code>&amp;</code>
+   (<code>gt mount dev &amp;</code>), or keep it in a tmux/screen
+   session.</p>
+
+<h4>"Can I skip <code>--view</code> everywhere?"</h4>
+<p>Yes — every element command honors the <code>GT_VIEW</code>
+   environment variable. <code>gt setview &lt;name&gt;</code> drops you
+   into a subshell with it set.</p>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase and cleartool are trademarks of IBM / HCL Technologies. This product is not affiliated with or endorsed by either company.</span><br>
+    <a href="index.html">Home</a> ·
+    <a href="guide.html">Guide</a> ·
+    <a href="commands.html">Commands</a> ·
+    <a href="architecture.html">Architecture</a>
+</div></footer>
+</body>
+</html>

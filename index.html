@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gt — GitViewTool</title>
+    <meta name="description" content="gt (GitViewTool) — ClearCase-style workflow on Git. Named views, reserved checkouts, dynamic mounts.">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="stylesheet" href="assets/style.css">
+    <script>
+        // Pick a language from the browser. Override via ?lang=en or ?lang=ko.
+        // ?page=<name> deep-links to a specific document inside the chosen
+        // language (name matches the filename stem, e.g. "guide", "usage").
+        (function () {
+            var lang = (navigator.language || "en").toLowerCase().indexOf("ko") === 0
+                     ? "ko" : "en";
+            var q = new URLSearchParams(location.search);
+            if (q.get("lang") === "en") lang = "en";
+            if (q.get("lang") === "ko") lang = "ko";
+            var page = q.get("page") || "index";
+            if (q.get("nopick") !== "1") {
+                location.replace(lang + "/" + page + ".html");
+            }
+        })();
+    </script>
+</head>
+<body>
+<main class="page">
+    <div class="container">
+        <div class="hero">
+            <h1>gt — GitViewTool</h1>
+            <p class="lede">Choose a language / 언어 선택</p>
+            <p class="ctas">
+                <a class="cta" href="en/index.html">English</a>
+                <a class="cta secondary" href="ko/index.html">한국어</a>
+            </p>
+        </div>
+    </div>
+</main>
+</body>
+</html>

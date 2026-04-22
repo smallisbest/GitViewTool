@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gt — GitViewTool</title>
+    <meta name="description" content="gt brings the ClearCase-style workflow to any Git repository — named views, reserved checkouts, lightweight dynamic mounts.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· ClearCase-style workflow on Git</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html" class="active">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="usage.html">Usage</a>
+        <a href="commands.html">Commands</a>
+        <a href="architecture.html">Architecture</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="index.html" class="active">EN</a>
+        <a href="../ko/index.html">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<section class="hero">
+    <h1>ClearCase feel, Git inside.</h1>
+    <p class="lede">
+        gt wraps a standard Git repository with the workflow a
+        <code>cleartool</code> user expects — named views, reserved and
+        unreserved checkouts, dynamic mounts that keep each view's
+        edits isolated. No central VOB server, no kernel extension, no
+        changes to your repo.
+    </p>
+    <p class="ctas">
+        <a class="cta" href="guide.html">Install &amp; start in 5 minutes</a>
+        <a class="cta secondary" href="usage.html">See real workflows</a>
+    </p>
+</section>
+
+<h2>Why gt</h2>
+<div class="features">
+    <div class="feature">
+        <h3>Independent views</h3>
+        <p>Each view is a persistent workspace pinned to a branch. Two
+           views on the same branch keep fully separate in-progress
+           edits, mtimes, and checkout claims.</p>
+    </div>
+    <div class="feature">
+        <h3>Real checkout semantics</h3>
+        <p>Reserved checkouts give you an exclusive edit lock across
+           views; unreserved ones allow parallel work with first-to-ci
+           wins. Git doesn't offer this on its own.</p>
+    </div>
+    <div class="feature">
+        <h3>Lightweight mounts</h3>
+        <p>A view's tree is served through a user-space virtual file
+           system. Files are read lazily — no whole-repo materialization,
+           no wasted disk space per view.</p>
+    </div>
+    <div class="feature">
+        <h3>Per-view mtime preservation</h3>
+        <p>Every view maintains file modification times independently.
+           Switching views does not disturb any other view's state.</p>
+    </div>
+    <div class="feature">
+        <h3>Stays out of your repo</h3>
+        <p>gt's metadata lives in <code>~/.gt/</code> — never in
+           <code>.git/</code>. Your normal git tooling and IDE
+           integrations keep working unchanged.</p>
+    </div>
+    <div class="feature">
+        <h3>Real Git commits</h3>
+        <p>When you check in, gt creates an ordinary Git commit on the
+           view's pinned branch. <code>git log</code>,
+           <code>git push</code>, and CI systems see it as any other
+           commit.</p>
+    </div>
+</div>
+
+<h2>At a glance</h2>
+<pre><code># one-time setup per repo
+gt mkvob
+
+# a view pinned to main
+gt mkview dev --branch main
+gt mount  dev
+
+# in another terminal — claim a file, edit it, check in
+gt co  src/hello.c --view dev -c "adding hello"
+$EDITOR ~/.gt/repos/&lt;id&gt;/mounts/dev/src/hello.c
+gt ci  src/hello.c --view dev -c "implemented hello"
+
+# push the commit as you would any git commit
+git -C ~/src/myproject push origin main</code></pre>
+
+<h2>Get started</h2>
+<p>
+    <a class="cta" href="guide.html">Installation &amp; first-use guide</a>
+    <a class="cta secondary" href="commands.html">Command reference</a>
+    <a class="cta secondary" href="architecture.html">How it works</a>
+</p>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase and cleartool are trademarks of IBM / HCL Technologies. This product is not affiliated with or endorsed by either company.</span><br>
+    <a href="guide.html">Guide</a> ·
+    <a href="usage.html">Usage</a> ·
+    <a href="commands.html">Commands</a> ·
+    <a href="architecture.html">Architecture</a>
+</div></footer>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>구조 — gt</title>
+    <meta name="description" content="gt의 내부 구조: 저장 레이아웃, FUSE 백엔드, overlay 기반 체크아웃 모델, view 격리 방식.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· 구조</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">홈</a>
+        <a href="guide.html">가이드</a>
+        <a href="usage.html">사용법</a>
+        <a href="commands.html">명령어</a>
+        <a href="architecture.html" class="active">구조</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="../en/architecture.html">EN</a>
+        <a href="architecture.html" class="active">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>gt는 어떻게 만들어졌나</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    gt는 단일 자체 완결 커맨드라인 바이너리입니다. 저장소를 수정하지
+    않고, 별도 디렉터리에 자체 상태를 유지하며, 기존 Git 내용 위에
+    view별 가상 파일시스템을 제공합니다.
+</p>
+
+<div class="toc">
+    <strong>이 페이지 안에서</strong>
+    <ul>
+        <li><a href="#overview">개요</a></li>
+        <li><a href="#layout">디스크 레이아웃</a></li>
+        <li><a href="#views-impl">View 격리</a></li>
+        <li><a href="#fs">FUSE 레이어</a></li>
+        <li><a href="#checkouts">체크아웃 강제</a></li>
+        <li><a href="#ci-flow">체크인 동작</a></li>
+        <li><a href="#coexist">일반 git과 공존</a></li>
+        <li><a href="#roadmap">현재 상태와 로드맵</a></li>
+    </ul>
+</div>
+
+<h2 id="overview">개요</h2>
+
+<pre><code>       사용자 프로세스 (에디터, 셸)
+                │
+                │ POSIX syscalls (stat, open, read, write, readlink, ...)
+                ▼
+      ┌──────────────────────────┐
+      │  FUSE-T NFS 루프백       │  커널 확장 없음
+      └──────────────┬───────────┘
+                     │ libfuse 2.x API
+                     ▼
+        ┌────────────────────────┐
+        │   gt mount &lt;view&gt;      │  경로별 라우팅:
+        │                        │   · 체크아웃 X → Git blob
+        │                        │   · 체크아웃 O → overlay 파일
+        └────┬────────────┬──────┘
+             │            │
+             ▼            ▼
+    ┌────────────┐  ┌─────────────┐
+    │  libgit2   │  │  overlay/   │  view별 쓰기 가능 shadow
+    │  (.git/)   │  └─────────────┘
+    └────────────┘
+             ▲
+             │
+    ┌────────┴───────────┐
+    │  sqlite3 metadata  │  ~/.gt/repos/&lt;id&gt;/metadata.db
+    │  views, checkouts  │   · partial unique index로
+    │                    │     reserved 체크아웃 배타성 강제
+    └────────────────────┘</code></pre>
+
+<h2 id="layout">디스크 레이아웃</h2>
+<p>gt가 관리하는 모든 상태는 <code>~/.gt/</code> 아래에 있습니다
+   (<code>GT_HOME</code> 환경변수로 override 가능):</p>
+
+<pre><code>~/.gt/                          # $GT_HOME으로 override
+├── registry.db                 # 저장소 경로 → repo-id 인덱스
+├── log/
+│   └── gt.log                  # rotating 로그 (5 × 1 MB)
+└── repos/&lt;12-hex-id&gt;/
+    ├── metadata.db             # views, checkouts
+    ├── config.toml             # default_cs_branch, default_remote
+    ├── views/&lt;view&gt;/
+    │   └── overlay/            # 쓰기 가능 shadow
+    └── mounts/&lt;view&gt;/          # 기본 FUSE 마운트 경로</code></pre>
+
+<p><code>gt mkvob</code>로 등록된 각 저장소는 정규 절대 경로의 12자리
+   16진 digest로 식별되는 자체 하위 디렉터리를 갖습니다. 저장소 경로가
+   바뀌면 gt 입장에서는 다른 저장소로 인식됩니다.</p>
+
+<h2 id="views-impl">View 격리</h2>
+<p><strong>View</strong>는 다음 세 가지 상태로 구성됩니다:</p>
+<ol>
+    <li>메타데이터 DB의 레코드: 이름, 종류(Phase 1은 모두 <em>dynamic</em>),
+        고정 브랜치, 마운트 경로.</li>
+    <li><strong>overlay</strong> — 체크아웃된 파일의 편집 내용이
+        저장되는 실제 디렉터리.</li>
+    <li><strong>마운트 경로</strong> — FUSE 백엔드가 view를 노출하는
+        디렉터리.</li>
+</ol>
+<p>같은 브랜치 위의 두 view는 완전히 독립적입니다. 수정되지 않은 파일
+   내용은 Git을 통해 공유(같은 blob)하지만, overlay, 체크아웃
+   레지스트리, 마운트 경로는 각각 분리되어 있습니다.</p>
+
+<h2 id="fs">FUSE 레이어</h2>
+<p><code>gt mount &lt;view&gt;</code>를 실행하면 FUSE 백엔드가 다음
+   작업을 수행합니다:</p>
+<ol>
+    <li>View의 고정 브랜치를 commit OID로 해석.</li>
+    <li>해당 commit의 트리를 순회해 마운트 내 절대 경로로 인덱싱된
+        인메모리 인덱스 구축.</li>
+    <li>POSIX 파일시스템 호출에 응답:
+        <ul>
+            <li><strong>getattr / readdir</strong> — 인메모리 인덱스에서
+                응답. 수정 시간은 커밋의 타임스탬프.</li>
+            <li><strong>open / read</strong> — 최초 접근 시 libgit2로
+                blob을 지연 로드하고 프로세스 내에서 캐시.</li>
+            <li><strong>write / truncate</strong> — 해당 경로에 활성
+                체크아웃이 있을 때만 허용. 쓰기는 overlay 파일로 감.</li>
+            <li><strong>readlink</strong> — 심볼릭 링크 엔트리의 blob
+                내용을 반환.</li>
+        </ul>
+    </li>
+</ol>
+<p>macOS에서는 FUSE-T의 NFSv4 루프백 전송 계층을 통해 백엔드와
+   통신하므로 커널 확장이 필요하지 않습니다.</p>
+
+<h2 id="checkouts">체크아웃 강제</h2>
+<p>gt의 체크아웃 레지스트리는 저장소별 SQLite DB에 있으며 두 가지
+   규칙을 강제합니다:</p>
+<ul>
+    <li><strong>Reserved 배타성</strong> —
+        <code>(element_path) WHERE mode = 'reserved'</code>에 걸린 partial
+        unique index가 특정 요소에 대해 한 번에 하나의 view만 reserved
+        체크아웃을 보유할 수 있도록 보장.</li>
+    <li><strong>Unreserved 동시성</strong> — 여러 view가 같은 요소에
+        동시에 unreserved 체크아웃을 보유 가능. 먼저 커밋한 view가 이기고,
+        이후 체크인은 기준 브랜치가 움직였다는 경고와 함께 tip 위에
+        얹힘.</li>
+</ul>
+<p>FUSE 백엔드는 모든 쓰기 경로에서 이 레지스트리를 참조합니다.
+   체크아웃 없는 파일은 <code>open</code> 시점에 EROFS로 거부되어
+   실수 편집을 방지합니다.</p>
+
+<h2 id="ci-flow">체크인 동작</h2>
+<ol>
+    <li>Overlay 파일의 바이트 읽기.</li>
+    <li>libgit2로 새 Git blob 작성.</li>
+    <li>현재 브랜치 tip 트리를 복제하며 해당 요소의 leaf를 새 blob OID로
+        교체.</li>
+    <li>사용자의 <code>user.name</code> / <code>user.email</code> Git
+        설정으로 author를 채운 커밋을 브랜치 tip을 부모로 하여 생성.</li>
+    <li>브랜치 참조를 새 커밋으로 fast-forward.</li>
+    <li>체크아웃 기록 제거, overlay 파일 삭제.</li>
+</ol>
+<p>결과물은 일반 Git으로 만든 커밋과 구별되지 않습니다.
+   <code>git log</code>, <code>git push</code>, CI 파이프라인 모두 동일하게
+   취급합니다.</p>
+
+<h2 id="coexist">일반 git과 공존</h2>
+<p>gt와 일반 git은 같은 작업 저장소를 안전하게 공유할 수 있습니다:</p>
+<ul>
+    <li>gt는 <code>.git/</code>을 전혀 건드리지 않고, 자체 상태는
+        <code>~/.gt/</code>에만 존재.</li>
+    <li>gt는 working tree를 수정하지 않고, 편집은 overlay 디렉터리로
+        들어감.</li>
+    <li><code>git pull</code>이나 <code>git rebase</code> 후 view의 고정
+        브랜치가 움직였을 수 있으므로 <code>gt umount</code> +
+        <code>gt mount</code>로 새 트리를 다시 인덱싱.</li>
+    <li>리모트로의 push/fetch는 전적으로 일반 git의 역할 — gt는 오프라인
+        전용.</li>
+</ul>
+
+<h2 id="roadmap">현재 상태와 로드맵</h2>
+<table>
+    <tr><th>기능</th><th>상태</th></tr>
+    <tr><td>저장소 등록 (<code>mkvob</code>)</td><td><span class="status-pill mvp">지원</span></td></tr>
+    <tr><td>Dynamic view (FUSE 기반)</td><td><span class="status-pill mvp">지원</span></td></tr>
+    <tr><td>Reserved / unreserved checkout</td><td><span class="status-pill mvp">지원</span></td></tr>
+    <tr><td>단일 브랜치 config spec</td><td><span class="status-pill mvp">지원</span></td></tr>
+    <tr><td>Supervised 백그라운드 데몬 (<code>gt mount -b</code>)</td><td><span class="status-pill future">예정</span></td></tr>
+    <tr><td>Config spec 규칙 목록 (label + path)</td><td><span class="status-pill future">예정</span></td></tr>
+    <tr><td>체크인 후 tree 자동 re-index</td><td><span class="status-pill future">예정</span></td></tr>
+    <tr><td>파일별 last-modifying-commit mtime</td><td><span class="status-pill future">예정</span></td></tr>
+    <tr><td>Snapshot view</td><td><span class="status-pill future">예정</span></td></tr>
+    <tr><td>팀 공유 (중앙 lock 서버)</td><td><span class="status-pill future">예정</span></td></tr>
+</table>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase와 cleartool은 IBM / HCL Technologies의 상표입니다. 본 제품은 두 회사와 제휴 관계가 없으며 어떠한 후원도 받지 않습니다.</span><br>
+    <a href="index.html">홈</a> ·
+    <a href="guide.html">가이드</a> ·
+    <a href="usage.html">사용법</a> ·
+    <a href="commands.html">명령어</a>
+</div></footer>
+</body>
+</html>

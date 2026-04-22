@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Architecture — gt</title>
+    <meta name="description" content="How gt is built: storage layout, FUSE backend, overlay-based checkout model, and how views isolate state.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· Architecture</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="usage.html">Usage</a>
+        <a href="commands.html">Commands</a>
+        <a href="architecture.html" class="active">Architecture</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="architecture.html" class="active">EN</a>
+        <a href="../ko/architecture.html">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>How gt is built</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    gt is a single self-contained command-line binary. It never modifies
+    your repository; instead it keeps all of its state in a private
+    directory tree and serves per-view virtual filesystems on top of
+    your existing Git content.
+</p>
+
+<div class="toc">
+    <strong>On this page</strong>
+    <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#layout">On-disk layout</a></li>
+        <li><a href="#views-impl">View isolation</a></li>
+        <li><a href="#fs">The FUSE layer</a></li>
+        <li><a href="#checkouts">Checkout enforcement</a></li>
+        <li><a href="#ci-flow">How check-in works</a></li>
+        <li><a href="#coexist">Coexistence with plain git</a></li>
+        <li><a href="#roadmap">Status &amp; roadmap</a></li>
+    </ul>
+</div>
+
+<h2 id="overview">Overview</h2>
+
+<pre><code>       User process (editor, shell)
+                │
+                │ POSIX syscalls (stat, open, read, write, readlink, ...)
+                ▼
+      ┌──────────────────────────┐
+      │  FUSE-T NFS loopback     │  no kernel extension
+      └──────────────┬───────────┘
+                     │ libfuse 2.x API
+                     ▼
+        ┌────────────────────────┐
+        │   gt mount &lt;view&gt;      │  routes each path:
+        │                        │   · no checkout  → Git blob
+        │                        │   · checked out  → overlay file
+        └────┬────────────┬──────┘
+             │            │
+             ▼            ▼
+    ┌────────────┐  ┌─────────────┐
+    │  libgit2   │  │  overlay/   │  per-view writable shadow
+    │  (.git/)   │  └─────────────┘
+    └────────────┘
+             ▲
+             │
+    ┌────────┴───────────┐
+    │  sqlite3 metadata  │  ~/.gt/repos/&lt;id&gt;/metadata.db
+    │  views, checkouts  │   · partial unique index enforces
+    │                    │     reserved-checkout exclusivity
+    └────────────────────┘</code></pre>
+
+<h2 id="layout">On-disk layout</h2>
+<p>All gt-managed state lives under <code>~/.gt/</code> (overridable via
+   the <code>GT_HOME</code> environment variable):</p>
+
+<pre><code>~/.gt/                          # override with $GT_HOME
+├── registry.db                 # path → repo-id index
+├── log/
+│   └── gt.log                  # rotating log (5 × 1 MB)
+└── repos/&lt;12-hex-id&gt;/
+    ├── metadata.db             # views, checkouts
+    ├── config.toml             # default_cs_branch, default_remote
+    ├── views/&lt;view&gt;/
+    │   └── overlay/            # writable shadow
+    └── mounts/&lt;view&gt;/          # default FUSE mount point</code></pre>
+
+<p>Each repository registered with <code>gt mkvob</code> gets its own
+   subdirectory identified by a 12-hex digest of its canonical absolute
+   path, so renaming a repo directory produces a new gt identity.</p>
+
+<h2 id="views-impl">View isolation</h2>
+<p>A <strong>view</strong> is a named workspace with three pieces of
+   state:</p>
+<ol>
+    <li>A record in the metadata database: name, kind (Phase 1 is
+        always <em>dynamic</em>), pinned branch, mount path.</li>
+    <li>An <strong>overlay</strong> directory — a real directory where
+        edits to checked-out files live.</li>
+    <li>A <strong>mount point</strong> — the directory where the FUSE
+        backend exposes the view to the user.</li>
+</ol>
+<p>Two views on the same branch are entirely independent. They share
+   unmodified file contents via Git (same blobs), but their overlays,
+   checkout registries, and mount points are separate.</p>
+
+<h2 id="fs">The FUSE layer</h2>
+<p>When you run <code>gt mount &lt;view&gt;</code>, gt starts a FUSE
+   backend that:</p>
+<ol>
+    <li>Resolves the view's pinned branch to a commit OID.</li>
+    <li>Walks the tree of that commit and builds an in-memory index
+        keyed by absolute path within the mount.</li>
+    <li>Answers POSIX filesystem calls:
+        <ul>
+            <li><strong>getattr / readdir</strong> — served from the
+                in-memory index; modification times come from the
+                commit's timestamp.</li>
+            <li><strong>open / read</strong> — lazy-reads the blob from
+                libgit2 the first time, then caches it in-process.</li>
+            <li><strong>write / truncate</strong> — only allowed if the
+                path has a live checkout record; writes go to the
+                overlay file.</li>
+            <li><strong>readlink</strong> — returns the blob contents
+                of a symlink entry.</li>
+        </ul>
+    </li>
+</ol>
+<p>macOS hosts talk to the backend through FUSE-T's NFS-v4 loopback
+   transport, so no kernel extension is required.</p>
+
+<h2 id="checkouts">Checkout enforcement</h2>
+<p>gt's checkout registry sits in the per-repo SQLite database and
+   enforces two rules:</p>
+<ul>
+    <li><strong>Reserved exclusivity</strong> — a partial unique index
+        on <code>(element_path) WHERE mode = 'reserved'</code>
+        guarantees at most one view may hold a reserved checkout on a
+        given element at any time.</li>
+    <li><strong>Unreserved concurrency</strong> — multiple views may
+        hold unreserved checkouts on the same element; first-to-commit
+        wins, and subsequent check-ins are warned about the base having
+        moved.</li>
+</ul>
+<p>The FUSE backend consults this registry on every write path. Files
+   without a checkout are surfaced with EROFS at <code>open</code>
+   time, preventing accidental edits.</p>
+
+<h2 id="ci-flow">How check-in works</h2>
+<ol>
+    <li>Read the overlay file's bytes.</li>
+    <li>Write them as a new Git blob via libgit2.</li>
+    <li>Clone the current branch-tip tree, replacing the leaf at the
+        element's path with the new blob OID.</li>
+    <li>Create a commit parented at the branch tip, authored with the
+        user's normal <code>user.name</code> / <code>user.email</code>
+        Git configuration.</li>
+    <li>Fast-forward the branch reference to the new commit.</li>
+    <li>Remove the checkout record and delete the overlay file.</li>
+</ol>
+<p>The result is indistinguishable from a commit made via plain Git.
+   <code>git log</code>, <code>git push</code>, and continuous
+   integration pipelines all treat it identically.</p>
+
+<h2 id="coexist">Coexistence with plain git</h2>
+<p>gt and plain git can safely share the same working repository:</p>
+<ul>
+    <li>gt never touches <code>.git/</code>; all of its state lives
+        under <code>~/.gt/</code>.</li>
+    <li>gt does not modify your working tree; edits go to the overlay
+        directory instead.</li>
+    <li>After a <code>git pull</code> or <code>git rebase</code>, a
+        view's pinned branch may have moved; a <code>gt umount</code>
+        followed by <code>gt mount</code> re-indexes to the new tree.</li>
+    <li>Push and fetch to remotes are entirely the job of plain git —
+        gt is offline-only.</li>
+</ul>
+
+<h2 id="roadmap">Status &amp; roadmap</h2>
+<table>
+    <tr><th>Capability</th><th>Status</th></tr>
+    <tr><td>Per-repo registration (<code>mkvob</code>)</td><td><span class="status-pill mvp">now</span></td></tr>
+    <tr><td>Dynamic views (FUSE-backed)</td><td><span class="status-pill mvp">now</span></td></tr>
+    <tr><td>Reserved / unreserved checkouts</td><td><span class="status-pill mvp">now</span></td></tr>
+    <tr><td>Single-branch config spec</td><td><span class="status-pill mvp">now</span></td></tr>
+    <tr><td>Supervised background daemon (<code>gt mount -b</code>)</td><td><span class="status-pill future">planned</span></td></tr>
+    <tr><td>Config-spec rule lists (labels + paths)</td><td><span class="status-pill future">planned</span></td></tr>
+    <tr><td>Live tree re-index after check-in</td><td><span class="status-pill future">planned</span></td></tr>
+    <tr><td>Per-file mtime from last-modifying commit</td><td><span class="status-pill future">planned</span></td></tr>
+    <tr><td>Snapshot views</td><td><span class="status-pill future">planned</span></td></tr>
+    <tr><td>Team sharing (central lock server)</td><td><span class="status-pill future">planned</span></td></tr>
+</table>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase and cleartool are trademarks of IBM / HCL Technologies. This product is not affiliated with or endorsed by either company.</span><br>
+    <a href="index.html">Home</a> ·
+    <a href="guide.html">Guide</a> ·
+    <a href="usage.html">Usage</a> ·
+    <a href="commands.html">Commands</a>
+</div></footer>
+</body>
+</html>

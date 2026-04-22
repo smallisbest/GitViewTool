@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Commands — gt</title>
+    <meta name="description" content="Complete command reference for gt. All subcommands grouped by purpose with their flags, defaults, and behavior.">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site"><div class="container"><div class="bar">
+    <a class="brand" href="index.html">
+        <span class="logo">gt</span>
+        <span class="title">GitViewTool</span>
+        <span class="subtitle">· Commands</span>
+    </a>
+    <nav class="primary">
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="usage.html">Usage</a>
+        <a href="commands.html" class="active">Commands</a>
+        <a href="architecture.html">Architecture</a>
+    </nav>
+    <nav class="langswitch">
+        <a href="commands.html" class="active">EN</a>
+        <a href="../ko/commands.html">KO</a>
+    </nav>
+</div></div></header>
+
+<main class="page"><div class="container">
+
+<h1>Command reference</h1>
+<p class="lede" style="color:var(--fg-dim);max-width:62ch">
+    Every subcommand, grouped by purpose. <code>gt --help</code> and
+    <code>gt &lt;command&gt; --help</code> print the same information from
+    the terminal.
+</p>
+
+<div class="toc">
+    <strong>Groups</strong>
+    <ul>
+        <li><a href="#global">Global options</a></li>
+        <li><a href="#repo">Repository setup</a></li>
+        <li><a href="#views">View management</a></li>
+        <li><a href="#mount">Mount lifecycle</a></li>
+        <li><a href="#element">Element operations</a></li>
+        <li><a href="#meta">Information</a></li>
+        <li><a href="#env">Environment variables</a></li>
+        <li><a href="#exit">Exit codes</a></li>
+    </ul>
+</div>
+
+<!-- GLOBAL -->
+<div class="cmd-group" id="global">
+    <h3>Global options</h3>
+    <dl>
+        <dt>-C, --repo &lt;path&gt;</dt>
+        <dd>Run against the repository at <code>&lt;path&gt;</code>
+            instead of the one inferred from the current working
+            directory.</dd>
+
+        <dt>--help</dt>
+        <dd>Print top-level help.</dd>
+
+        <dt>--help-all</dt>
+        <dd>Print top-level help together with every subcommand's help,
+            recursively.</dd>
+
+        <dt>--version</dt>
+        <dd>Print the version string (short).</dd>
+
+        <dt>--version-long</dt>
+        <dd>Print version, build number, commit hash, and dependency
+            versions.</dd>
+    </dl>
+</div>
+
+<!-- REPO -->
+<div class="cmd-group" id="repo">
+    <h3>Repository setup</h3>
+    <dl>
+        <dt>gt mkvob [path] [--default-branch &lt;branch&gt;]</dt>
+        <dd>
+            Register a Git repository so other gt commands can operate
+            on it. Idempotent — calling it on an already-registered repo
+            just returns the existing registration. If <code>path</code>
+            is omitted, the current working directory is used.
+            <br>
+            Creates <code>~/.gt/repos/&lt;id&gt;/</code> with the repo's
+            metadata database and an initial config file.
+            <code>--default-branch</code> (default: <code>main</code>)
+            sets the fallback branch used by new views that don't
+            specify one.
+        </dd>
+    </dl>
+</div>
+
+<!-- VIEWS -->
+<div class="cmd-group" id="views">
+    <h3>View management</h3>
+    <dl>
+        <dt>gt mkview &lt;name&gt; [-b, --branch &lt;branch&gt;] [-m, --mount &lt;path&gt;]</dt>
+        <dd>
+            Create a new view. <code>--branch</code> pins the view to
+            that branch (defaults to the per-repo
+            <code>default_cs_branch</code>). <code>--mount</code>
+            overrides the default mount location of
+            <code>~/.gt/repos/&lt;id&gt;/mounts/&lt;name&gt;</code>.
+            The view is registered but not yet served — run
+            <code>gt mount</code> afterwards.
+        </dd>
+
+        <dt>gt lsview [-l, --long]</dt>
+        <dd>List all views in the current repo. <code>-l</code> adds
+            branch, mount path, and creation timestamp.</dd>
+
+        <dt>gt rmview &lt;name&gt; [-f, --force]</dt>
+        <dd>Remove a view. Refuses to run if the view is still mounted;
+            <code>-f</code> forces removal and also deletes the
+            overlay directory.</dd>
+
+        <dt>gt setview &lt;name&gt;</dt>
+        <dd>Spawn an interactive subshell with the working directory
+            set to the view's mount point and <code>GT_VIEW</code>
+            exported so subsequent <code>gt</code> commands
+            automatically target this view.</dd>
+
+        <dt>gt catcs &lt;name&gt;</dt>
+        <dd>Print the view's config spec. In Phase 1 this is a single
+            branch rule.</dd>
+
+        <dt>gt setcs &lt;name&gt; -b, --branch &lt;branch&gt;</dt>
+        <dd>Update a view's config spec to pin it to a different
+            branch. Remount the view (<code>gt umount</code> +
+            <code>gt mount</code>) to apply.</dd>
+    </dl>
+</div>
+
+<!-- MOUNT -->
+<div class="cmd-group" id="mount">
+    <h3>Mount lifecycle</h3>
+    <dl>
+        <dt>gt mount &lt;name&gt; [-d, --debug]</dt>
+        <dd>
+            Start the FUSE backend serving a view. Runs in the
+            foreground and blocks until an unmount. <code>-d</code>
+            prints FUSE-level debug output to stderr.
+            <br>
+            If FUSE-T is missing, gt prints a clear install instruction
+            and exits with code 2.
+        </dd>
+
+        <dt>gt umount &lt;name&gt; [-f, --force]</dt>
+        <dd>Unmount a view. Falls back to the <code>/sbin/umount</code>
+            command if the <code>unmount(2)</code> syscall fails.
+            <code>-f</code> passes <code>MNT_FORCE</code>.</dd>
+    </dl>
+</div>
+
+<!-- ELEMENT -->
+<div class="cmd-group" id="element">
+    <h3>Element (file) operations</h3>
+    <dl>
+        <dt>gt checkout &lt;file&gt; [options] — alias: <code>gt co</code></dt>
+        <dd>
+            Claim a file for edit and materialize its current branch
+            contents into the view's overlay.
+            <br><br>
+            <code>-reserved</code> (default) — only one view may hold a
+            reserved checkout of a file at a time.
+            <br>
+            <code>-unreserved</code> — several views may hold concurrent
+            checkouts; first check-in wins.
+            <br>
+            <code>-c &lt;comment&gt;</code> — store a comment with the
+            checkout record.
+            <br>
+            <code>-nc</code> — no comment.
+            <br>
+            <code>--view &lt;name&gt;</code> — select the view (falls
+            back to <code>GT_VIEW</code>).
+        </dd>
+
+        <dt>gt checkin &lt;file&gt; [options] — alias: <code>gt ci</code></dt>
+        <dd>
+            Convert the view's overlay contents into a real Git commit
+            on the pinned branch, release the checkout, and remove the
+            overlay file. Emits a warning if the branch has moved
+            since the checkout was taken.
+            <br><br>
+            <code>-c &lt;comment&gt;</code>, <code>-nc</code>,
+            <code>--view</code> as for <code>checkout</code>.
+        </dd>
+
+        <dt>gt uncheckout &lt;file&gt; [options] — alias: <code>gt unco</code></dt>
+        <dd>
+            Cancel a checkout without creating a commit. The overlay
+            file is removed.
+            <br><br>
+            <code>-keep</code> — rename the overlay to
+            <code>&lt;file&gt;.keep</code> before releasing the
+            checkout, preserving a backup.
+            <br>
+            <code>-rm</code> — discard silently (default).
+            <br>
+            <code>--view &lt;name&gt;</code> as above.
+        </dd>
+
+        <dt>gt ls [--co, --checkedout] [--view &lt;name&gt;]</dt>
+        <dd>List elements in a view. Without flags, lists all files
+            with a <code>*</code> next to any that are checked out.
+            <code>--co</code> shows only checked-out files, prefixed
+            with <code>R</code> (reserved) or <code>U</code>
+            (unreserved).</dd>
+
+        <dt>gt lshistory &lt;file&gt; [-n, --limit &lt;N&gt;] [--view &lt;name&gt;] — alias: <code>gt lsh</code></dt>
+        <dd>Show Git history for a single file on the view's pinned
+            branch. Default limit is 20 commits.</dd>
+
+        <dt>gt diff &lt;file&gt; [-pred, --predecessor] [--view &lt;name&gt;]</dt>
+        <dd>Unified diff between the view's overlay and the blob at
+            the branch tip. <code>-pred</code> diffs against the
+            preceding commit's version instead of the current tip.</dd>
+    </dl>
+</div>
+
+<!-- META -->
+<div class="cmd-group" id="meta">
+    <h3>Information</h3>
+    <dl>
+        <dt>gt --version</dt>
+        <dd>Print the short version string, for example <code>gt
+            0.1.0+20260422.0115.abc1234</code>.</dd>
+
+        <dt>gt --version-long</dt>
+        <dd>Print a multi-line block with version, build number, build
+            timestamp, commit hash and branch, and the embedded
+            versions of libgit2, SQLite, and spdlog.</dd>
+
+        <dt>gt --help / gt --help-all</dt>
+        <dd>Top-level help, or a recursive expansion of every
+            subcommand's help text.</dd>
+    </dl>
+</div>
+
+<!-- ENV -->
+<h2 id="env">Environment variables</h2>
+<table>
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr>
+        <td><code>GT_HOME</code></td>
+        <td>Root directory for all gt metadata, overlays, and mount
+            points. Defaults to <code>~/.gt</code>.</td>
+    </tr>
+    <tr>
+        <td><code>GT_REPO</code></td>
+        <td>Absolute path to a repo that overrides the current working
+            directory (lower priority than <code>-C</code>).</td>
+    </tr>
+    <tr>
+        <td><code>GT_VIEW</code></td>
+        <td>Default view name used whenever a command accepts
+            <code>--view</code>. Automatically set inside <code>gt
+            setview</code>'s subshell.</td>
+    </tr>
+    <tr>
+        <td><code>GT_TRACE_FS</code></td>
+        <td>When set to a non-empty value, <code>gt mount</code> prints
+            one line per FUSE <code>getattr</code> call to stderr for
+            debugging.</td>
+    </tr>
+</table>
+
+<!-- EXIT CODES -->
+<h2 id="exit">Exit codes</h2>
+<table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td>0</td><td>Success</td></tr>
+    <tr><td>1</td><td>Command-specific failure (conflict, I/O error, Git error, etc.)</td></tr>
+    <tr><td>2</td><td>Environment or argument error (e.g. FUSE-T not installed, no repo found, invalid flag combination)</td></tr>
+</table>
+
+</div></main>
+
+<footer class="site"><div class="container">
+    gt (GitViewTool) © 2026 smallisbest. All rights reserved.<br>
+    <span style="color:var(--fg-faint);font-size:0.82rem">ClearCase and cleartool are trademarks of IBM / HCL Technologies. This product is not affiliated with or endorsed by either company.</span><br>
+    <a href="index.html">Home</a> ·
+    <a href="guide.html">Guide</a> ·
+    <a href="usage.html">Usage</a> ·
+    <a href="architecture.html">Architecture</a>
+</div></footer>
+</body>
+</html>
